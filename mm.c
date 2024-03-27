@@ -27,16 +27,19 @@
  ********************************************************/
 team_t team = {
 	/* Team name */
-	"",
+	"Me, Myself, and I",
 	/* First member's full name */
-	"",
+	"John Talghader",
 	/* First member's NetID */
-	"",
+	"jat8",
 	/* Second member's full name (leave blank if none) */
 	"",
 	/* Second member's NetID (leave blank if none) */
 	""
 };
+
+/* Define basic constant for the number of size classes in segmented list */
+#define NUM_CLASSES 14
 
 /* Basic constants and macros: */
 #define WSIZE	  sizeof(void *) /* Word and header/footer size (bytes) */
@@ -89,15 +92,29 @@ static void printblock(void *bp);
 int
 mm_init(void)
 {
-
 	/* Create the initial empty heap. */
-	if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
+	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * WSIZE)) == (void *)-1))
 		return (-1);
-	PUT(heap_listp, 0);			       /* Alignment padding */
-	PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); /* Prologue header */
-	PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
-	PUT(heap_listp + (3 * WSIZE), PACK(0, 1));     /* Epilogue header */
-	heap_listp += (2 * WSIZE);
+	
+	/* Initialize segregated fits free list */
+	for (int i = 0; i <= NUM_CLASSES; i++) {
+		PUT(heap_listp + (i * WSIZE), 0);
+	}
+
+	/* Alignment padding */
+	PUT(heap_listp + (NUM_CLASSES * WSIZE), 0);
+
+	/* Prologue header */
+	PUT(heap_listp + ((NUM_CLASSES + 1) * WSIZE), PACK(DSIZE, 1));
+
+	/* Prologue footer */
+	PUT(heap_listp + ((NUM_CLASSES + 2) * WSIZE), PACK(DSIZE, 1));
+
+	/* Epilogue header */
+	PUT(heap_listp + ((NUM_CLASSES + 3) * WSIZE), PACK(0, 1));
+
+	/* Increment the heap_list pointer */
+	heap_listp += ((NUM_CLASSES + 2) * WSIZE);
 
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes. */
 	if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
