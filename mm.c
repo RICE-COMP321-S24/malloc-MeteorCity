@@ -39,11 +39,13 @@ team_t team = {
 };
 
 /* Define basic constant for the number of size classes in segmented list */
-#define NUM_CLASSES 14
+/* Classes are based on total block size, including memory overhead  */
+/* {32 - 64}, {64 - 128}, {4096 - inf} */
+#define NUM_CLASSES 8
 
 /* Basic constants and macros: */
-#define WSIZE	  sizeof(void *) /* Word and header/footer size (bytes) */
-#define DSIZE	  (2 * WSIZE)	 /* Doubleword size (bytes) */
+#define WSIZE	  sizeof(void *) /* Word and header/footer size (bytes) (8) */
+#define DSIZE	  (2 * WSIZE)	 /* Doubleword size (bytes) (16) */
 #define CHUNKSIZE (1 << 12)	 /* Extend heap by this amount (bytes) */
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -69,6 +71,7 @@ team_t team = {
 
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */
+static char *heap_listh; /* Head of heap list no matter if heap_listp changes */
 
 /* Function prototypes for internal helper routines: */
 static void *coalesce(void *bp);
@@ -95,10 +98,13 @@ mm_init(void)
 	/* Create the initial empty heap. */
 	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * WSIZE)) == (void *)-1))
 		return (-1);
+
+	heap_listh = heap_listp; /* Set heap_listh to the head */
 	
 	/* Initialize segregated fits free list */
 	for (int i = 0; i <= NUM_CLASSES; i++) {
-		PUT(heap_listp + (i * WSIZE), 0);
+		/* Each NULL will eventually be a ptr to the head of a LL */
+		PUT(heap_listp + (i * WSIZE), NULL);
 	}
 
 	/* Alignment padding */
@@ -124,7 +130,8 @@ mm_init(void)
 
 /*
  * Requires:
- *   None.
+ *   size - The size of the payload we're trying to allocate a block for. 
+ *          Assumes that both pointers are taken into account of in size
  *
  * Effects:
  *   Allocate a block with at least "size" bytes of payload, unless "size" is
@@ -142,11 +149,13 @@ mm_malloc(size_t size)
 	if (size == 0)
 		return (NULL);
 
-	/* Adjust block size to include overhead and alignment reqs. */
+	/* Adjust block size */
 	if (size <= DSIZE)
+		/* 2 DSIZE for header, footer, and pointers */
 		asize = 2 * DSIZE;
 	else
-		asize = DSIZE * ((size + DSIZE + (DSIZE - 1)) / DSIZE);
+		/* Round up to the nearest WSIZE and add DSIZE for hdr and ftr*/
+		asize = WSIZE * ((size + DSIZE + (WSIZE - 1)) / WSIZE);
 
 	/* Search the free list for a fit. */
 	if ((bp = find_fit(asize)) != NULL) {
@@ -310,13 +319,39 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	void *bp;
+	int class = find_class(asize);
+
+	/* Initializes bp to the ptr to the LL representing the correct class */
+	char *bp = heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
+	bp = (char *)bp + (class * WSIZE);
+
+	/* If the linked list is empty, move on to next bigger class */
+	for (int i = class; i < NUM_CLASSES; i++) {
+		if (bp == NULL)
+			bp += WSIZE;
+		else
+			break;
+
+		/* If no fit is found return NULL */
+		if (i == NUM_CLASSES - 1)
+			return (NULL);
+	}
+
+	char *head_hdr = HDRP(bp);
 
 	/* Search for the first fit. */
-	for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-		if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp)))
-			return (bp);
+	while (head_hdr != NULL) {
+		/* Return head_hdr if asize can fit in free block */
+		if (GET_SIZE(head_hdr) + DSIZE >= asize) {
+			return ((void *)head_hdr);
+		}
+		
+		/* Otherwise increment head_hdr to the next node in LL */
+		else {
+			head_hdr += 2 * WSIZE;
+		}
 	}
+
 	/* No fit was found. */
 	return (NULL);
 }
@@ -335,7 +370,15 @@ place(void *bp, size_t asize)
 {
 	size_t csize = GET_SIZE(HDRP(bp));
 
+	/* If there's enough space to split the free block, split it */
 	if ((csize - asize) >= (2 * DSIZE)) {
+		int class = find_class(csize);
+		int new_class;
+
+		if (new_class = find_class(csize - asize) != class) {
+			/* Change class */
+		}
+
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		bp = NEXT_BLKP(bp);
@@ -425,4 +468,17 @@ printblock(void *bp)
 
 	printf("%p: header: [%zu:%c] footer: [%zu:%c]\n", bp, hsize,
 	    (halloc ? 'a' : 'f'), fsize, (falloc ? 'a' : 'f'));
+}
+
+/*
+ * Requires:
+ *   asize - The size of the block we're trying to allocate
+ * 
+ * Effects:
+ *   Returns the int representing which size class asize falls into
+*/
+int
+find_class(size_t asize) {
+	/* Subtract 5 from the log since minimum asize is 32 */
+	return (int)log2(asize) - 5;
 }
