@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "memlib.h"
 #include "mm.h"
@@ -72,6 +73,7 @@ team_t team = {
 
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */
+
 static char *heap_listh; /* Head of heap list no matter if heap_listp changes */
 
 /* Function prototypes for internal helper routines: */
@@ -79,6 +81,8 @@ static void *coalesce(void *bp);
 static void *extend_heap(size_t words);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
+
+static int find_class(size_t asize);
 
 /* Function prototypes for heap consistency checker routines: */
 static void checkblock(void *bp);
@@ -97,15 +101,15 @@ int
 mm_init(void)
 {
 	/* Create the initial empty heap. */
-	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * WSIZE)) == (void *)-1))
+	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * WSIZE))) == (void *)-1)
 		return (-1);
 
 	heap_listh = heap_listp; /* Set heap_listh to the head */
 	
 	/* Initialize segregated fits free list */
 	for (int i = 0; i <= NUM_CLASSES; i++) {
-		/* Each NULL will eventually be a ptr to the head of a LL */
-		PUT(heap_listp + (i * WSIZE), NULL);
+		/* Each 0 will eventually be a ptr to the head of a LL */
+		PUT(heap_listp + (i * WSIZE), 0);
 	}
 
 	/* Alignment padding */
@@ -324,30 +328,30 @@ find_fit(size_t asize)
 
 	/* Initialize bp to a ptr to a ptr to the head of the LL
 	   representing the 1st possible class */
-	char *bp = heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
+	char **bp = &heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
 	bp += (class * WSIZE);
 
 	/* Initialize ll_head to be a pointer to the head of the ll */
 	char *ll_head = NULL;
 
-	/* If the ptr to the head isn't NULL (AKA the LL isn't empty) */
-	if (*bp != NULL) {
-		ll_head = HDRP(*bp);
+	/* If the ptr to the head isn't 0 (AKA the LL isn't empty) */
+	if (*bp != 0) {
+		ll_head = *bp;
 	}
 
 	/* Search to see if a free block in the smallest possible class can
 	   actually house a block of asize (since it's a range of values) */
-	while (ll_head != NULL) {
-		size_t csize = GET_SIZE(HDRP(ll_head));
+	while (ll_head != 0) {
+		size_t csize = GET_SIZE(ll_head);
 
 		/* If it can't be housed, increment bp to the next node in LL */
 		if (csize < asize) {
 			/* After the next line, ll_head now points to a 
 			   pointer which points to the next node in LL */
-			ll_head += 2 * WSIZE;
-			ll_head = HDRP(*ll_head);
+			char **next_ptr = (char **)(ll_head + 2 * WSIZE);
+			ll_head = *next_ptr;
 		} else {
-			return (HDRP(ll_head));
+			return ll_head;
 		}
 	}
 	
@@ -356,7 +360,7 @@ find_fit(size_t asize)
 
 	/* If the linked list is empty, move on to next bigger class */
 	for (int i = class; i < NUM_CLASSES; i++) {
-		if (bp == NULL)
+		if (bp == 0)
 			bp += WSIZE;
 		else
 			break;
@@ -367,7 +371,7 @@ find_fit(size_t asize)
 	}
 
 	/* Return a pointer to the first free block of the non-empty list */
-	return (HDRP(*bp));
+	return ((void *)*bp);
 }
 
 /*
@@ -389,7 +393,7 @@ place(void *bp, size_t asize)
 		int class = find_class(csize);
 		int new_class;
 
-		if (new_class = find_class(csize - asize) != class) {
+		if ((new_class = find_class(csize - asize)) != class) {
 			/* Change class */
 		}
 
