@@ -1,3 +1,4 @@
+
 /*
  * Simple, 32-bit and 64-bit clean allocator based on an implicit free list,
  * first fit placement, and boundary tag coalescing, as described in the
@@ -321,9 +322,37 @@ find_fit(size_t asize)
 {
 	int class = find_class(asize);
 
-	/* Initializes bp to the ptr to the LL representing the correct class */
+	/* Initialize bp to a ptr to a ptr to the head of the LL
+	   representing the 1st possible class */
 	char *bp = heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
-	bp = (char *)bp + (class * WSIZE);
+	bp += (class * WSIZE);
+
+	/* Initialize ll_head to be a pointer to the head of the ll */
+	char *ll_head = NULL;
+
+	/* If the ptr to the head isn't NULL (AKA the LL isn't empty) */
+	if (*bp != NULL) {
+		ll_head = HDRP(*bp);
+	}
+
+	/* Search to see if a free block in the smallest possible class can
+	   actually house a block of asize (since it's a range of values) */
+	while (ll_head != NULL) {
+		size_t csize = GET_SIZE(HDRP(ll_head));
+
+		/* If it can't be housed, increment bp to the next node in LL */
+		if (csize < asize) {
+			/* After the next line, ll_head now points to a 
+			   pointer which points to the next node in LL */
+			ll_head += 2 * WSIZE;
+			ll_head = HDRP(*ll_head);
+		} else {
+			return (HDRP(ll_head));
+		}
+	}
+	
+	/* Increment class since a fit wasn't found in the smallest class */
+	class++;
 
 	/* If the linked list is empty, move on to next bigger class */
 	for (int i = class; i < NUM_CLASSES; i++) {
@@ -337,23 +366,8 @@ find_fit(size_t asize)
 			return (NULL);
 	}
 
-	char *head_hdr = HDRP(bp);
-
-	/* Search for the first fit. */
-	while (head_hdr != NULL) {
-		/* Return head_hdr if asize can fit in free block */
-		if (GET_SIZE(head_hdr) + DSIZE >= asize) {
-			return ((void *)head_hdr);
-		}
-		
-		/* Otherwise increment head_hdr to the next node in LL */
-		else {
-			head_hdr += 2 * WSIZE;
-		}
-	}
-
-	/* No fit was found. */
-	return (NULL);
+	/* Return a pointer to the first free block of the non-empty list */
+	return (HDRP(*bp));
 }
 
 /*
@@ -404,7 +418,6 @@ place(void *bp, size_t asize)
 static void
 checkblock(void *bp)
 {
-
 	if ((uintptr_t)bp % DSIZE)
 		printf("Error: %p is not doubleword aligned\n", bp);
 	if (GET(HDRP(bp)) != GET(FTRP(bp)))
