@@ -71,6 +71,10 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
 
+/* Given a node in a linked list, return pointer to previous and next nodes */
+#define NEXT_LL(head) (*(char **)(head + 2 * WSIZE))
+#define PREV_LL(head) (*(char **)(head + 1 * WSIZE))
+
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */
 
@@ -82,7 +86,8 @@ static void *extend_heap(size_t words);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 
-static int find_class(size_t asize);
+static int get_min_class(size_t asize);
+static char *get_class_hdr(size_t asize);
 
 /* Function prototypes for heap consistency checker routines: */
 static void checkblock(void *bp);
@@ -324,54 +329,26 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	int class = find_class(asize);
+	char *head = get_class_hdr(asize);
 
-	/* Initialize bp to a ptr to a ptr to the head of the LL
-	   representing the 1st possible class */
-	char **bp = &heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
-	bp += (class * WSIZE);
-
-	/* Initialize ll_head to be a pointer to the head of the ll */
-	char *ll_head = NULL;
-
-	/* If the ptr to the head isn't 0 (AKA the LL isn't empty) */
-	if (*bp != 0) {
-		ll_head = *bp;
+	if (head == NULL) {
+		return (NULL);
 	}
-
-	/* Search to see if a free block in the smallest possible class can
-	   actually house a block of asize (since it's a range of values) */
-	while (ll_head != 0) {
-		size_t csize = GET_SIZE(ll_head);
+	
+	/* Iterate through linked list */
+	while (head != NULL) {
+		size_t csize = GET_SIZE(head);
 
 		/* If it can't be housed, increment bp to the next node in LL */
 		if (csize < asize) {
-			/* After the next line, ll_head now points to a 
-			   pointer which points to the next node in LL */
-			char **next_ptr = (char **)(ll_head + 2 * WSIZE);
-			ll_head = *next_ptr;
+			head = NEXT_LL(head);
 		} else {
-			return ll_head;
+			break;
 		}
 	}
-	
-	/* Increment class since a fit wasn't found in the smallest class */
-	class++;
 
-	/* If the linked list is empty, move on to next bigger class */
-	for (int i = class; i < NUM_CLASSES; i++) {
-		if (bp == 0)
-			bp += WSIZE;
-		else
-			break;
-
-		/* If no fit is found return NULL */
-		if (i == NUM_CLASSES - 1)
-			return (NULL);
-	}
-
-	/* Return a pointer to the first free block of the non-empty list */
-	return ((void *)*bp);
+	/* Return a pointer to the first free block that can house asize */
+	return (head/* + WSIZE*/); /* Add WSIZE to account for header */
 }
 
 /*
@@ -386,22 +363,38 @@ find_fit(size_t asize)
 static void
 place(void *bp, size_t asize)
 {
-	size_t csize = GET_SIZE(HDRP(bp));
+	size_t csize = GET_SIZE(/* HDRP */(bp));
 
 	/* If there's enough space to split the free block, split it */
 	if ((csize - asize) >= (2 * DSIZE)) {
-		int class = find_class(csize);
+		int class = get_min_class(asize);
 		int new_class;
 
-		if ((new_class = find_class(csize - asize)) != class) {
-			/* Change class */
+		if ((new_class = get_min_class(csize - asize)) != class) {
+			/* Remove the block from original linked list */
+			/* Add the split free block to its new linked list */
+
+			char *head = get_class_hdr(csize);
+
+			while (head != NULL) {
+				if (head == bp) {
+					NEXT_LL(PREV_LL(head)) = NEXT_LL(head);
+					PREV_LL(NEXT_LL(head)) = PREV_LL(head);
+					break;
+				}
+
+				head = NEXT_LL(head);
+			}
 		}
 
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
+		char *allocated_bp = HDRP(bp);
+		char *free_bp = NEXT_BLKP(bp);
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
+		
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
@@ -492,10 +485,77 @@ printblock(void *bp)
  *   asize - The size of the block we're trying to allocate
  * 
  * Effects:
- *   Returns the int representing which size class asize falls into
+ *   Returns the int representing the minimum size class asize could fall into
 */
 int
-find_class(size_t asize) {
+get_min_class(size_t asize) {
 	/* Subtract 5 from the log since minimum asize is 32 */
-	return (int)log2(asize) - 5;
+	int class = (int)log2(asize) - 5;
+
+	if (class > NUM_CLASSES - 1)
+		class = NUM_CLASSES - 1;
+	
+	return class;
+}
+
+/*
+ * Requires:
+ *   asize - The size of the block we're trying to allocate
+ *
+ * Effects:
+ *   Returns the head of the linked list that contains a free block with
+ *   at least size asize. Returns (null) if one isn't found.
+*/
+static char *
+get_class_hdr(size_t asize) {
+	int class = get_min_class(asize);
+
+	/* Initialize bp to a ptr to a ptr to the head of the LL
+	   representing the 1st possible class */
+	char **bp = &heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
+	bp += (class * WSIZE);
+
+	/* Initialize head to be a pointer to the head of the ll */
+	char *head = NULL;
+
+	/* If the ptr to the head isn't 0 (AKA the LL isn't empty) */
+	if (*bp != 0) {
+		head = *bp;
+	}
+	
+	char *og_head = head;
+
+	/* Search to see if a free block in the smallest possible class can
+	   actually house a block of asize (since it's a range of values) */
+	while (head != NULL) {
+		size_t csize = GET_SIZE(head);
+
+		/* If it can't be housed, increment bp to the next node in LL */
+		if (csize < asize) {
+			head = NEXT_LL(head);
+		} else {
+			return (og_head);
+		}
+	}
+	
+	/* Increment class since a fit wasn't found in the smallest class */
+	if (class < NUM_CLASSES - 1) {
+		class++;
+		bp += (1 * WSIZE);
+	}
+
+	/* If the linked list is empty, move on to next bigger class */
+	for (int i = class; i < NUM_CLASSES; i++) {
+		if (bp == NULL)
+			bp += WSIZE;
+		else
+			break;
+
+		/* If no fit is found return NULL */
+		if (i == NUM_CLASSES - 1)
+			return (NULL);
+	}
+
+	/* Return a pointer to the first free block of the non-empty list */
+	return (*bp);
 }
