@@ -370,16 +370,20 @@ place(void *bp, size_t asize)
 		int class = get_min_class(asize);
 		int new_class;
 
+		/* Remove the block from original linked list */
 		if ((new_class = get_min_class(csize - asize)) != class) {
-			/* Remove the block from original linked list */
-			/* Add the split free block to its new linked list */
-
 			char *head = get_class_hdr(csize);
 
 			while (head != NULL) {
+				/* Set head's pointers to NULL and skip head */
 				if (head == bp) {
 					NEXT_LL(PREV_LL(head)) = NEXT_LL(head);
-					PREV_LL(NEXT_LL(head)) = PREV_LL(head);
+					if (NEXT_LL(head) != NULL) {
+						PREV_LL(NEXT_LL(head)) = 
+							PREV_LL(head);
+					}
+					NEXT_LL(head) = NULL;
+					PREV_LL(head) = NULL;
 					break;
 				}
 
@@ -389,11 +393,27 @@ place(void *bp, size_t asize)
 
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
-		char *allocated_bp = HDRP(bp);
-		char *free_bp = NEXT_BLKP(bp);
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
+		/* Bring bp to reference header */
+		bp = HDRP(bp);
+
+		/* Add the split free block to its new linked list */
+		if (new_class != class) {
+			char *new_head = get_class_hdr(csize - asize);
+
+			if (NEXT_LL(new_head) != NULL) {
+				PREV_LL(NEXT_LL(bp)) = bp;
+				NEXT_LL(bp) = NEXT_LL(new_head);
+			}
+			NEXT_LL(new_head) = bp;
+			PREV_LL(bp) = new_head;
+		}
+
+		/* Set the pointers for the free block to be connected to
+		   the linked list.
+		*/
 		
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
