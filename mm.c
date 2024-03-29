@@ -40,6 +40,13 @@ team_t team = {
 	""
 };
 
+struct free_block {
+	struct free_block *prev;
+	struct free_block *next;
+};
+
+typedef struct free_block *free_ptr;
+
 /* Define basic constant for the number of size classes in segmented list */
 /* Classes are based on total block size, including memory overhead  */
 /* {32 - 64}, {64 - 128}, {4096 - inf} */
@@ -60,7 +67,7 @@ team_t team = {
 #define PUT(p, val) (*(uintptr_t *)(p) = (val))
 
 /* Read the size and allocated fields from address p. */
-#define GET_SIZE(p)  (GET(p) & ~(DSIZE - 1))
+#define GET_SIZE(p)  (GET(p) & ~(WSIZE - 1))
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
 /* Given block ptr bp, compute address of its header and footer. */
@@ -75,10 +82,11 @@ team_t team = {
 #define NEXT_LL(head) (*(char **)(head + 2 * WSIZE))
 #define PREV_LL(head) (*(char **)(head + 1 * WSIZE))
 
+#define LL_HEAD(class) (*(heap_listh + class))
+
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */
-
-static char *heap_listh; /* Head of heap list no matter if heap_listp changes */
+static free_ptr fb_list;
 
 /* Function prototypes for internal helper routines: */
 static void *coalesce(void *bp);
@@ -88,6 +96,8 @@ static void place(void *bp, size_t asize);
 
 static int get_min_class(size_t asize);
 static char *get_class_hdr(size_t asize);
+static void print_linked_lists();
+static void print_heap_values();
 
 /* Function prototypes for heap consistency checker routines: */
 static void checkblock(void *bp);
@@ -106,15 +116,13 @@ int
 mm_init(void)
 {
 	/* Create the initial empty heap. */
-	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * WSIZE))) == (void *)-1)
+	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * DSIZE))) == (void *)-1)
 		return (-1);
-
-	heap_listh = heap_listp; /* Set heap_listh to the head */
 	
 	/* Initialize segregated fits free list */
-	for (int i = 0; i <= NUM_CLASSES; i++) {
-		/* Each 0 will eventually be a ptr to the head of a LL */
-		PUT(heap_listp + (i * WSIZE), 0);
+	for (int i = 0; i < NUM_CLASSES; i++) {
+		fb_list[i].prev = &fb_list[i];
+		fb_list[i].next = &fb_list[i];
 	}
 
 	/* Alignment padding */
@@ -318,6 +326,7 @@ extend_heap(size_t words)
 	return (coalesce(bp));
 }
 
+
 /*
  * Requires:
  *   None.
@@ -363,58 +372,13 @@ find_fit(size_t asize)
 static void
 place(void *bp, size_t asize)
 {
-	size_t csize = GET_SIZE(/* HDRP */(bp));
-
-	/* If there's enough space to split the free block, split it */
+	size_t csize = GET_SIZE(HDRP(bp));
 	if ((csize - asize) >= (2 * DSIZE)) {
-		int class = get_min_class(asize);
-		int new_class;
-
-		/* Remove the block from original linked list */
-		if ((new_class = get_min_class(csize - asize)) != class) {
-			char *head = get_class_hdr(csize);
-
-			while (head != NULL) {
-				/* Set head's pointers to NULL and skip head */
-				if (head == bp) {
-					NEXT_LL(PREV_LL(head)) = NEXT_LL(head);
-					if (NEXT_LL(head) != NULL) {
-						PREV_LL(NEXT_LL(head)) = 
-							PREV_LL(head);
-					}
-					NEXT_LL(head) = NULL;
-					PREV_LL(head) = NULL;
-					break;
-				}
-
-				head = NEXT_LL(head);
-			}
-		}
-
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
-		/* Bring bp to reference header */
-		bp = HDRP(bp);
-
-		/* Add the split free block to its new linked list */
-		if (new_class != class) {
-			char *new_head = get_class_hdr(csize - asize);
-
-			if (NEXT_LL(new_head) != NULL) {
-				PREV_LL(NEXT_LL(bp)) = bp;
-				NEXT_LL(bp) = NEXT_LL(new_head);
-			}
-			NEXT_LL(new_head) = bp;
-			PREV_LL(bp) = new_head;
-		}
-
-		/* Set the pointers for the free block to be connected to
-		   the linked list.
-		*/
-		
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
@@ -528,54 +492,5 @@ get_min_class(size_t asize) {
 */
 static char *
 get_class_hdr(size_t asize) {
-	int class = get_min_class(asize);
-
-	/* Initialize bp to a ptr to a ptr to the head of the LL
-	   representing the 1st possible class */
-	char **bp = &heap_listh; // MIGHT BE ABLE TO REPLACE THIS WITH mem_heap_lo() apsdiofjapodifj
-	bp += (class * WSIZE);
-
-	/* Initialize head to be a pointer to the head of the ll */
-	char *head = NULL;
-
-	/* If the ptr to the head isn't 0 (AKA the LL isn't empty) */
-	if (*bp != 0) {
-		head = *bp;
-	}
 	
-	char *og_head = head;
-
-	/* Search to see if a free block in the smallest possible class can
-	   actually house a block of asize (since it's a range of values) */
-	while (head != NULL) {
-		size_t csize = GET_SIZE(head);
-
-		/* If it can't be housed, increment bp to the next node in LL */
-		if (csize < asize) {
-			head = NEXT_LL(head);
-		} else {
-			return (og_head);
-		}
-	}
-	
-	/* Increment class since a fit wasn't found in the smallest class */
-	if (class < NUM_CLASSES - 1) {
-		class++;
-		bp += (1 * WSIZE);
-	}
-
-	/* If the linked list is empty, move on to next bigger class */
-	for (int i = class; i < NUM_CLASSES; i++) {
-		if (bp == NULL)
-			bp += WSIZE;
-		else
-			break;
-
-		/* If no fit is found return NULL */
-		if (i == NUM_CLASSES - 1)
-			return (NULL);
-	}
-
-	/* Return a pointer to the first free block of the non-empty list */
-	return (*bp);
 }
