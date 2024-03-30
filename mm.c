@@ -29,15 +29,15 @@
  ********************************************************/
 team_t team = {
 	/* Team name */
-	"Me, Myself, and I",
+	"win dian",
 	/* First member's full name */
 	"John Talghader",
 	/* First member's NetID */
 	"jat8",
 	/* Second member's full name (leave blank if none) */
-	"",
+	"Anjali Yamasani",
 	/* Second member's NetID (leave blank if none) */
-	""
+	"ay50"
 };
 
 struct free_block {
@@ -321,6 +321,8 @@ extend_heap(size_t words)
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
+
+
 
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));

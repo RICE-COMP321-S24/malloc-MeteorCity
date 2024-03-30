@@ -1,5 +1,7 @@
 COMP 321 Project 5: Malloc
-<Replace with your name(s) and NetID(s).>
+<John Talghader jat8, Anjali Yamasani ay50>
+
+Using 2 slipdays
 
 ---(Do not write lines of text that exceed the width of this line.)------------
 
