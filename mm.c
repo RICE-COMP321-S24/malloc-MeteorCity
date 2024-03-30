@@ -78,12 +78,6 @@ typedef struct free_block *free_ptr;
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
 
-/* Given a node in a linked list, return pointer to previous and next nodes */
-#define NEXT_LL(head) (*(char **)(head + 2 * WSIZE))
-#define PREV_LL(head) (*(char **)(head + 1 * WSIZE))
-
-#define LL_HEAD(class) (*(heap_listh + class))
-
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */
 static free_ptr fb_list;
@@ -95,9 +89,12 @@ static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 
 static int get_min_class(size_t asize);
-static char *get_class_hdr(size_t asize);
+/* static char *get_class_hdr(size_t asize); */
+// static void coalesce_helper_back(char *block1, char *block2);
+// static void coalesce_helper_front(char *block1, char *block2);
+static void insert_node(void *bp);
+static void remove_node(void *bp);
 static void print_linked_lists();
-static void print_heap_values();
 
 /* Function prototypes for heap consistency checker routines: */
 static void checkblock(void *bp);
@@ -115,8 +112,8 @@ static void printblock(void *bp);
 int
 mm_init(void)
 {
-	/* Create the initial empty heap. */
-	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * DSIZE))) == (void *)-1)
+	/* Initialize fb_list */
+	if ((fb_list = mem_sbrk(NUM_CLASSES * DSIZE)) == (void *)-1)
 		return (-1);
 	
 	/* Initialize segregated fits free list */
@@ -125,20 +122,24 @@ mm_init(void)
 		fb_list[i].next = &fb_list[i];
 	}
 
+	/* Initialize heap */
+	if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
+		return (-1);
+
 	/* Alignment padding */
-	PUT(heap_listp + (NUM_CLASSES * WSIZE), 0);
+	PUT(heap_listp, 0);
 
 	/* Prologue header */
-	PUT(heap_listp + ((NUM_CLASSES + 1) * WSIZE), PACK(DSIZE, 1));
+	PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));
 
 	/* Prologue footer */
-	PUT(heap_listp + ((NUM_CLASSES + 2) * WSIZE), PACK(DSIZE, 1));
+	PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
 
 	/* Epilogue header */
-	PUT(heap_listp + ((NUM_CLASSES + 3) * WSIZE), PACK(0, 1));
+	PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
 
 	/* Increment the heap_list pointer */
-	heap_listp += ((NUM_CLASSES + 2) * WSIZE);
+	heap_listp += (2 * WSIZE);
 
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes. */
 	if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
@@ -279,23 +280,30 @@ coalesce(void *bp)
 	bool next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
 
 	if (prev_alloc && next_alloc) { /* Case 1 */
+		insert_node(bp);
 		return (bp);
 	} else if (prev_alloc && !next_alloc) { /* Case 2 */
 		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+		remove_node(NEXT_BLKP(bp));
 		PUT(HDRP(bp), PACK(size, 0));
 		PUT(FTRP(bp), PACK(size, 0));
 	} else if (!prev_alloc && next_alloc) { /* Case 3 */
 		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+		remove_node(PREV_BLKP(bp));
 		PUT(FTRP(bp), PACK(size, 0));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
 	} else { /* Case 4 */
 		size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
 		    GET_SIZE(FTRP(NEXT_BLKP(bp)));
+		remove_node(NEXT_BLKP(bp));
+		remove_node(PREV_BLKP(bp));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
 	}
+
+	insert_node(bp);
 	return (bp);
 }
 
@@ -322,8 +330,6 @@ extend_heap(size_t words)
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
 
-
-
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
@@ -340,26 +346,38 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
+	if (asize == asize + 1) {
+		return (NULL);
+	} else {
+		return (NULL);
+	}
+	/*
 	char *head = get_class_hdr(asize);
 
 	if (head == NULL) {
 		return (NULL);
 	}
+	*/
+
 	
 	/* Iterate through linked list */
+	/*
 	while (head != NULL) {
 		size_t csize = GET_SIZE(head);
+		*/
 
 		/* If it can't be housed, increment bp to the next node in LL */
+		/*
 		if (csize < asize) {
 			head = NEXT_LL(head);
 		} else {
 			break;
 		}
-	}
+	} 
+	*/
 
 	/* Return a pointer to the first free block that can house asize */
-	return (head/* + WSIZE*/); /* Add WSIZE to account for header */
+	/* return (head + WSIZE); Add WSIZE to account for header */
 }
 
 /*
@@ -475,8 +493,12 @@ printblock(void *bp)
 */
 int
 get_min_class(size_t asize) {
+	if (asize == 32) {
+		return 0;
+	}
+
 	/* Subtract 5 from the log since minimum asize is 32 */
-	int class = (int)log2(asize) - 5;
+	int class = (int)log2(asize - 1) - 5;
 
 	if (class > NUM_CLASSES - 1)
 		class = NUM_CLASSES - 1;
@@ -492,7 +514,72 @@ get_min_class(size_t asize) {
  *   Returns the head of the linked list that contains a free block with
  *   at least size asize. Returns (null) if one isn't found.
 */
+/*
 static char *
 get_class_hdr(size_t asize) {
 	
+}
+*/
+
+/*
+ * Requires:
+ *   bp - Pointer to the free block we're adding to the linked list
+ *
+ * Effects:
+ *   Adds bp to the end of the linked list
+*/
+static void
+insert_node(void *bp) {
+	size_t size = GET_SIZE(HDRP(bp));
+	int class = get_min_class(size);
+	printf("Class: %d\n", class);
+	free_ptr head = &fb_list[class];
+	free_ptr new_block = bp;
+
+	new_block->next = head;
+	new_block->prev = head->prev;
+	head->prev->next = new_block;
+	head->prev = new_block;
+
+	print_linked_lists();
+}
+
+/*
+ * Requires:
+ *   bp - Pointer to the free block we're adding to the linked list
+ *
+ * Effects:
+ *   Removes bp from the linked list
+*/
+static void
+remove_node(void *bp) {
+	size_t size = GET_SIZE(HDRP(bp));
+	int class = get_min_class(size);
+	free_ptr head = &fb_list[class];
+	free_ptr curr = head->next;
+	free_ptr remove_block = bp;
+
+	while (curr != head) {
+		if (curr == remove_block) {
+			remove_block->next->prev = remove_block->prev;
+			remove_block->prev->next = remove_block->next;
+			remove_block->prev = NULL;
+			remove_block->next = NULL;
+		}
+		curr = curr->next;
+	}
+}
+
+static void
+print_linked_lists() {
+	for (int i = 0; i < NUM_CLASSES; i++) {
+		free_ptr head = &fb_list[i];
+		free_ptr curr = head->next;
+
+		printf("Linked List: %d\n", i);
+		while(curr != head) {
+			printf("Next node: %p\n", curr);
+			curr = curr->next;
+		}
+	}
 }
