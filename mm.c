@@ -14,11 +14,11 @@
  * as a pointer, i.e., sizeof(uintptr_t) == sizeof(void *).
  */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 
 #include "memlib.h"
 #include "mm.h"
@@ -118,7 +118,7 @@ mm_init(void)
 	/* Create the initial empty heap. */
 	if ((heap_listp = mem_sbrk(((NUM_CLASSES + 4) * DSIZE))) == (void *)-1)
 		return (-1);
-	
+
 	/* Initialize segregated fits free list */
 	for (int i = 0; i < NUM_CLASSES; i++) {
 		fb_list[i].prev = &fb_list[i];
@@ -148,7 +148,7 @@ mm_init(void)
 
 /*
  * Requires:
- *   size - The size of the payload we're trying to allocate a block for. 
+ *   size - The size of the payload we're trying to allocate a block for.
  *          Assumes that both pointers are taken into account of in size
  *
  * Effects:
@@ -322,12 +322,9 @@ extend_heap(size_t words)
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
 
-
-
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
-
 
 /*
  * Requires:
@@ -345,7 +342,7 @@ find_fit(size_t asize)
 	if (head == NULL) {
 		return (NULL);
 	}
-	
+
 	/* Iterate through linked list */
 	while (head != NULL) {
 		size_t csize = GET_SIZE(head);
@@ -359,7 +356,7 @@ find_fit(size_t asize)
 	}
 
 	/* Return a pointer to the first free block that can house asize */
-	return (head/* + WSIZE*/); /* Add WSIZE to account for header */
+	return (head /* + WSIZE*/); /* Add WSIZE to account for header */
 }
 
 /*
@@ -436,6 +433,23 @@ checkheap(bool verbose)
 		printblock(bp);
 	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
 		printf("Bad epilogue header\n");
+
+	// Is every block in the free list marked as free?
+
+	// Are there any contiguous free blocks that somehow escaped coalescing?
+	for (int i = 0; i < NUM_CLASSES; i++) {
+
+		while (fb_list[i].next !=) {
+			if (!GET_ALLOC(HDRP(next_bp)) && !GET_ALLOC(HDRP(bp))) {
+				printf(
+				    "Two contiguous free blocks not coalesced\n");
+			}
+		}
+	}
+	// Is every free block actually in the free list?
+	// Do the pointers in the free list point to valid free blocks?
+	// Do any allocated blocks overlap?
+	// Do the pointers in a heap block point to valid heap addresses?
 }
 
 /*
@@ -469,18 +483,19 @@ printblock(void *bp)
 /*
  * Requires:
  *   asize - The size of the block we're trying to allocate
- * 
+ *
  * Effects:
  *   Returns the int representing the minimum size class asize could fall into
-*/
+ */
 int
-get_min_class(size_t asize) {
+get_min_class(size_t asize)
+{
 	/* Subtract 5 from the log since minimum asize is 32 */
 	int class = (int)log2(asize) - 5;
 
 	if (class > NUM_CLASSES - 1)
 		class = NUM_CLASSES - 1;
-	
+
 	return class;
 }
 
@@ -491,8 +506,8 @@ get_min_class(size_t asize) {
  * Effects:
  *   Returns the head of the linked list that contains a free block with
  *   at least size asize. Returns (null) if one isn't found.
-*/
+ */
 static char *
-get_class_hdr(size_t asize) {
-	
+get_class_hdr(size_t asize)
+{
 }
