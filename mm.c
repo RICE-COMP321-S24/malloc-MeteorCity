@@ -89,9 +89,6 @@ static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 
 static int get_min_class(size_t asize);
-/* static char *get_class_hdr(size_t asize); */
-// static void coalesce_helper_back(char *block1, char *block2);
-// static void coalesce_helper_front(char *block1, char *block2);
 static void insert_node(void *bp);
 static void remove_node(void *bp);
 static void print_linked_lists();
@@ -346,38 +343,32 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	if (asize == asize + 1) {
-		return (NULL);
-	} else {
-		return (NULL);
-	}
-	/*
-	char *head = get_class_hdr(asize);
+	int min_class = get_min_class(asize);
+	free_ptr head = &fb_list[min_class];
+	free_ptr curr = head->next;
 
-	if (head == NULL) {
-		return (NULL);
-	}
-	*/
-
-	
-	/* Iterate through linked list */
-	/*
-	while (head != NULL) {
-		size_t csize = GET_SIZE(head);
-		*/
-
-		/* If it can't be housed, increment bp to the next node in LL */
-		/*
-		if (csize < asize) {
-			head = NEXT_LL(head);
-		} else {
-			break;
+	while (curr != head) {
+		size_t size = GET_SIZE(HDRP(curr));
+		if (size >= asize) {
+			return(curr);
 		}
-	} 
-	*/
 
-	/* Return a pointer to the first free block that can house asize */
-	/* return (head + WSIZE); Add WSIZE to account for header */
+		curr = curr->next;
+	}
+
+	if (min_class < NUM_CLASSES - 1)
+		min_class++;
+
+	for (int i = min_class; i < NUM_CLASSES; i++) {
+		free_ptr head = &fb_list[i];
+		free_ptr curr = head->next;
+
+		if (curr != head) {
+			return(curr);
+		}
+	}
+
+	return NULL;
 }
 
 /*
@@ -392,13 +383,18 @@ find_fit(size_t asize)
 static void
 place(void *bp, size_t asize)
 {
+	/* Move split free block to lower class */
+	/* Remove split allocated block from linked lists */
 	size_t csize = GET_SIZE(HDRP(bp));
 	if ((csize - asize) >= (2 * DSIZE)) {
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
+		remove_node(bp);
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
+		remove_node(bp);
+		insert_node(bp);
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
@@ -505,21 +501,6 @@ get_min_class(size_t asize) {
 	
 	return class;
 }
-
-/*
- * Requires:
- *   asize - The size of the block we're trying to allocate
- *
- * Effects:
- *   Returns the head of the linked list that contains a free block with
- *   at least size asize. Returns (null) if one isn't found.
-*/
-/*
-static char *
-get_class_hdr(size_t asize) {
-	
-}
-*/
 
 /*
  * Requires:
