@@ -176,7 +176,6 @@ mm_malloc(size_t size)
 	/* Ignore spurious requests. */
 	if (size == 0)
 		return (NULL);
-
 #ifdef DEBUG_PRINT
 	printf("Trying to mm_malloc %lu\n", size);
 #endif
@@ -246,6 +245,7 @@ mm_realloc(void *ptr, size_t size)
 {
 	size_t oldsize;
 	void *newptr;
+	size_t asize;
 
 	/* If size == 0 then this is just free, and we return NULL. */
 	if (size == 0) {
@@ -264,9 +264,15 @@ mm_realloc(void *ptr, size_t size)
 	}
 
 	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+
+	if (size <= DSIZE)
+		asize = 2 * DSIZE;
+	else
+		asize = DSIZE * ((size + DSIZE + (DSIZE - 1)) / DSIZE);
+
 	/* Try to reuse current block if possible. */
-	if (oldsize >= size) {
-		place(ptr, size);
+	if (oldsize >= asize) {
+		place(ptr, asize);
 		return ptr;
 	}
 
@@ -361,7 +367,7 @@ extend_heap(size_t words)
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
-	
+
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
@@ -411,6 +417,7 @@ place(void *bp, size_t asize)
 		remove_node(bp); // to-do: verify
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
+
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
@@ -554,7 +561,9 @@ printblock(void *bp)
 	falloc = GET_ALLOC(FTRP(bp));
 
 	if (hsize == 0) {
+
 		printf("%p: end of heap\n", bp);
+
 		return;
 	}
 
@@ -626,11 +635,11 @@ insert_node(void *bp)
 	new_block->prev = head->prev;
 	head->prev->next = new_block;
 	head->prev = new_block;
-
 #ifdef DEBUG_PRINT
-	printf("print_linked_lists in insert_node\n");
 	print_linked_lists();
 #endif
+
+	// checkheap(false);
 }
 
 /*
@@ -648,17 +657,15 @@ remove_node(void *bp)
 	free_ptr head = &fb_list[classIdx];
 	free_ptr curr = head->next;
 	free_ptr remove_block = bp;
-
 #ifdef DEBUG_PRINT
 	printf("remove_node classIdx=%d\n", classIdx);
 #endif
-
 	while (curr != head) {
 		if (curr == remove_block) {
 			remove_block->next->prev = remove_block->prev;
 			remove_block->prev->next = remove_block->next;
-			remove_block->prev = NULL;
-			remove_block->next = NULL;
+			// remove_block->prev = NULL;
+			// remove_block->next = NULL;
 			return;
 		}
 		curr = curr->next;
