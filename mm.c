@@ -53,9 +53,10 @@ typedef struct free_block *free_ptr;
 #define NUM_CLASSES 8
 
 /* Basic constants and macros: */
-#define WSIZE	  sizeof(void *) /* Word and header/footer size (bytes) (8) */
-#define DSIZE	  (2 * WSIZE)	 /* Doubleword size (bytes) (16) */
-#define CHUNKSIZE (1 << 12)	 /* Extend heap by this amount (bytes) */
+#define WSIZE	       sizeof(void *) /* Word and header/footer size (bytes) (8) */
+#define DSIZE	       (2 * WSIZE)    /* Doubleword size (bytes) (16) */
+#define CHUNKSIZE      (1 << 12)      /* Extend heap by this amount (bytes) */
+#define MIN_BLOCK_SIZE (2 * DSIZE)    /* Minimum block size (bytes) (32) */
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
@@ -69,6 +70,10 @@ typedef struct free_block *free_ptr;
 /* Read the size and allocated fields from address p. */
 #define GET_SIZE(p)  (GET(p) & ~(WSIZE - 1))
 #define GET_ALLOC(p) (GET(p) & 0x1)
+
+/* Determine if prologue or epilogue */
+#define IS_FIRST_BLOCK(p) (GET_SIZE(HDRP(PREV_BLKP(p))) == 0)
+#define IS_LAST_BLOCK(p)  (GET_SIZE(HDRP(NEXT_BLKP(p))) == 0)
 
 /* Given block ptr bp, compute address of its header and footer. */
 #define HDRP(bp) ((char *)(bp)-WSIZE)
@@ -242,6 +247,16 @@ mm_realloc(void *ptr, size_t size)
 	if (ptr == NULL)
 		return (mm_malloc(size));
 
+	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+	/* Try to reuse current block if possible. */
+	if (oldsize >= size) {
+		place(ptr, size);
+		return ptr;
+	}
+
+	/* */
+
+	/* Creates a new allocated block and copies over. */
 	newptr = mm_malloc(size);
 
 	/* If realloc() fails, the original block is left untouched.  */
@@ -249,7 +264,7 @@ mm_realloc(void *ptr, size_t size)
 		return (NULL);
 
 	/* Copy just the old data, not the old header and footer. */
-	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+
 	if (size < oldsize)
 		oldsize = size;
 	memcpy(newptr, ptr, oldsize);
@@ -391,12 +406,13 @@ static void
 place(void *bp, size_t asize)
 {
 	size_t csize = GET_SIZE(HDRP(bp));
-	if ((csize - asize) >= (2 * DSIZE)) {
+	if ((csize - asize) >= (MIN_BLOCK_SIZE)) {
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
+		// to-do: put node in correct-size free list
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
@@ -453,24 +469,41 @@ checkheap(bool verbose)
 	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
 		printf("Bad epilogue header\n");
 
+	// compare headers and footers to ensure equality
+
 	// Is every block in the free list marked as free?
 
 	// Are there any contiguous free blocks that somehow escaped coalescing?
+	// Do the pointers in the free list point to valid free blocks?
 	for (int i = 0; i < NUM_CLASSES; i++) {
-		void *start = fb_list[i];
-
-		while (fb_list[i].next !=) {
-			if (!GET_ALLOC(HDRP(next_bp)) && !GET_ALLOC(HDRP(bp))) {
-				printf(
-				    "Two contiguous free blocks not coalesced\n");
+		void *curr = fb_list[i].next;
+		// loop through circular linked list for size class i
+		while (curr != &fb_list[i]) {
+			if (GET_ALLOC(curr)) {
+				printf("Allocated block in free list\n");
+			} else {
+				// check if prev block is free, given that curr
+				// is not the first block
+				if (!IS_FIRST_BLOCK(curr) &&
+				    !GET_ALLOC(HDRP(PREV_BLKP(curr)))) {
+					printf(
+					    "Previous free block not coalesced\n");
+				}
+				// check if next block is free, given that curr
+				// is not the last block
+				if (!IS_LAST_BLOCK(curr) &&
+				    !GET_ALLOC(HDRP(NEXT_BLKP(curr)))) {
+					printf(
+					    "Next free block not coalesced\n");
+				}
 			}
 		}
 	}
-	// Is every free block actually in the free list?
-	// Do the pointers in the free list point to valid free blocks?
-	// Do any allocated blocks overlap?
-	// Do the pointers in a heap block point to valid heap addresses?
 }
+// Is every free block actually in the free list?
+// Do the pointers in the free list point to valid free blocks?
+// Do any allocated blocks overlap?
+// Do the pointers in a heap block point to valid heap addresses?
 
 /*
  * Requires:
