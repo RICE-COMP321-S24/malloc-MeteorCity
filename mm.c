@@ -49,7 +49,7 @@ typedef struct free_block *free_ptr;
 
 /* Define basic constant for the number of size classes in segmented list */
 /* Classes are based on total block size, including memory overhead  */
-/* {32 - 64}, {64 - 128}, {4096 - inf} */
+/* {32 - 64}, {65 - 128}, ..., {4097 - inf} */
 #define NUM_CLASSES 8
 
 /* Basic constants and macros: */
@@ -247,14 +247,18 @@ mm_realloc(void *ptr, size_t size)
 	if (ptr == NULL)
 		return (mm_malloc(size));
 
+	/* Make sure ptr points to an allocated block. */
+	if (!GET_ALLOC(HDRP(ptr))) {
+		printf("Error: Trying to reallocate a free block.\n");
+		return NULL;
+	}
+
 	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
 	/* Try to reuse current block if possible. */
 	if (oldsize >= size) {
 		place(ptr, size);
 		return ptr;
 	}
-
-	/* */
 
 	/* Creates a new allocated block and copies over. */
 	newptr = mm_malloc(size);
@@ -360,11 +364,19 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	if (asize == asize + 1) {
-		return (NULL);
-	} else {
-		return (NULL);
+	int classIdx = get_min_class(asize);
+	while (classIdx < NUM_CLASSES) {
+		free_ptr head = &fb_list[classIdx];
+		free_ptr curr = head->next;
+		while (curr != head) {
+			if (GET_SIZE(HDRP(curr)) >= asize) {
+				return curr;
+			}
+			curr = curr->next;
+		}
+		classIdx++;
 	}
+	return NULL;
 	/*
 	char *head = get_class_hdr(asize);
 
@@ -420,6 +432,28 @@ place(void *bp, size_t asize)
 }
 
 /*
+ * Requires:
+ *   "bp" is the address of a block.
+ *
+ * Effects:
+ *   Perform a search in the free lists for a free block "bp" in the heap.
+ */
+static bool
+isblockinfreelist(void *bp)
+{
+	for (int i = 0; i < NUM_CLASSES; i++) {
+		void *curr = fb_list[i].next;
+		// loop through circular linked list for size class i
+		while (curr != &fb_list[i]) {
+			if (curr == bp) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/*
  * The remaining routines are heap consistency checker routines.
  */
 
@@ -462,6 +496,13 @@ checkheap(bool verbose)
 		if (verbose)
 			printblock(bp);
 		checkblock(bp);
+
+		/* Checks if every free block is actually in the free list. */
+		if (!GET_ALLOC(HDRP(bp))) {
+			if (!isblockinfreelist(bp)) {
+				printf("Free block not in free list.\n");
+			}
+		}
 	}
 
 	if (verbose)
@@ -469,14 +510,10 @@ checkheap(bool verbose)
 	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
 		printf("Bad epilogue header\n");
 
-	// compare headers and footers to ensure equality
-
-	// Is every block in the free list marked as free?
-
 	// Are there any contiguous free blocks that somehow escaped coalescing?
 	// Do the pointers in the free list point to valid free blocks?
 	for (int i = 0; i < NUM_CLASSES; i++) {
-		void *curr = fb_list[i].next;
+		free_ptr curr = fb_list[i].next;
 		// loop through circular linked list for size class i
 		while (curr != &fb_list[i]) {
 			if (GET_ALLOC(curr)) {
@@ -489,18 +526,19 @@ checkheap(bool verbose)
 					printf(
 					    "Previous free block not coalesced\n");
 				}
-				// check if next block is free, given that curr
-				// is not the last block
+				/* Check if next block is free, given that curr
+				 * is not the last block */
 				if (!IS_LAST_BLOCK(curr) &&
 				    !GET_ALLOC(HDRP(NEXT_BLKP(curr)))) {
 					printf(
 					    "Next free block not coalesced\n");
 				}
 			}
+			curr = curr->next;
 		}
 	}
 }
-// Is every free block actually in the free list?
+
 // Do the pointers in the free list point to valid free blocks?
 // Do any allocated blocks overlap?
 // Do the pointers in a heap block point to valid heap addresses?
@@ -548,12 +586,12 @@ get_min_class(size_t asize)
 	}
 
 	/* Subtract 5 from the log since minimum asize is 32 */
-	int class = (int)log2(asize - 1) - 5;
+	int classIdx = (int)log2(asize - 1) - 5;
 
-	if (class > NUM_CLASSES - 1)
-		class = NUM_CLASSES - 1;
+	if (classIdx > NUM_CLASSES - 1)
+		classIdx = NUM_CLASSES - 1;
 
-	return class;
+	return classIdx;
 }
 
 /*
@@ -582,9 +620,9 @@ static void
 insert_node(void *bp)
 {
 	size_t size = GET_SIZE(HDRP(bp));
-	int class = get_min_class(size);
-	printf("Class: %d\n", class);
-	free_ptr head = &fb_list[class];
+	int classIdx = get_min_class(size);
+	printf("ClassIdx: %d\n", classIdx);
+	free_ptr head = &fb_list[classIdx];
 	free_ptr new_block = bp;
 
 	new_block->next = head;
@@ -606,8 +644,8 @@ static void
 remove_node(void *bp)
 {
 	size_t size = GET_SIZE(HDRP(bp));
-	int class = get_min_class(size);
-	free_ptr head = &fb_list[class];
+	int classIdx = get_min_class(size);
+	free_ptr head = &fb_list[classIdx];
 	free_ptr curr = head->next;
 	free_ptr remove_block = bp;
 
@@ -617,6 +655,7 @@ remove_node(void *bp)
 			remove_block->prev->next = remove_block->next;
 			remove_block->prev = NULL;
 			remove_block->next = NULL;
+			return;
 		}
 		curr = curr->next;
 	}
