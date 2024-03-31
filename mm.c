@@ -96,7 +96,7 @@ static void place(void *bp, size_t asize);
 static int get_min_class(size_t asize);
 static void insert_node(void *bp);
 static void remove_node(void *bp);
-static void print_linked_lists();
+// static void print_linked_lists();
 
 /* Function prototypes for heap consistency checker routines: */
 static void checkblock(void *bp);
@@ -148,7 +148,11 @@ mm_init(void)
 		return (-1);
 	/* to-do: Put this in the free list? */
 	// insert_node(heap_listp);
+
+#ifdef DEBUG_PRINT
+	printf("print_linked_lists in mm_init\n");
 	print_linked_lists();
+#endif
 	return (0);
 }
 
@@ -173,7 +177,9 @@ mm_malloc(size_t size)
 	if (size == 0)
 		return (NULL);
 
+#ifdef DEBUG_PRINT
 	printf("Trying to mm_malloc %lu\n", size);
+#endif
 	/* Adjust block size */
 	if (size <= DSIZE)
 		/* 2 DSIZE for header, footer, and pointers */
@@ -184,7 +190,9 @@ mm_malloc(size_t size)
 
 	/* Search the free list for a fit. */
 	if ((bp = find_fit(asize)) != NULL) {
+#ifdef DEBUG_PRINT
 		printf("Found a fit at %p\n", bp);
+#endif
 		place(bp, asize);
 		return (bp);
 	}
@@ -345,13 +353,15 @@ extend_heap(size_t words)
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
 	if ((bp = mem_sbrk(size)) == (void *)-1)
 		return (NULL);
+#ifdef DEBUG_PRINT
 	printf("Extending heap by %lu\n", size);
+#endif
 
 	/* Initialize free block header/footer and the epilogue header. */
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
-	insert_node(bp);
+	
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
@@ -380,32 +390,6 @@ find_fit(size_t asize)
 		classIdx++;
 	}
 	return NULL;
-	/*
-	char *head = get_class_hdr(asize);
-
-	if (head == NULL) {
-		return (NULL);
-	}
-	*/
-
-	/* Iterate through linked list */
-	/*
-	while (head != NULL) {
-		size_t csize = GET_SIZE(head);
-		*/
-
-	/* If it can't be housed, increment bp to the next node in LL */
-	/*
-	if (csize < asize) {
-		head = NEXT_LL(head);
-	} else {
-		break;
-	}
-}
-*/
-
-	/* Return a pointer to the first free block that can house asize */
-	/* return (head + WSIZE); Add WSIZE to account for header */
 }
 
 /*
@@ -427,7 +411,6 @@ place(void *bp, size_t asize)
 		remove_node(bp); // to-do: verify
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
-		remove_node(bp);
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
@@ -627,9 +610,15 @@ get_class_hdr(size_t asize) {
 static void
 insert_node(void *bp)
 {
+#ifdef DEBUG_PRINT
+	printf("Trying to insert %p\n", bp);
+#endif
+
 	size_t size = GET_SIZE(HDRP(bp));
 	int classIdx = get_min_class(size);
+#ifdef DEBUG_PRINT
 	printf("ClassIdx: %d\n", classIdx);
+#endif
 	free_ptr head = &fb_list[classIdx];
 	free_ptr new_block = bp;
 
@@ -638,7 +627,10 @@ insert_node(void *bp)
 	head->prev->next = new_block;
 	head->prev = new_block;
 
+#ifdef DEBUG_PRINT
+	printf("print_linked_lists in insert_node\n");
 	print_linked_lists();
+#endif
 }
 
 /*
@@ -657,7 +649,9 @@ remove_node(void *bp)
 	free_ptr curr = head->next;
 	free_ptr remove_block = bp;
 
+#ifdef DEBUG_PRINT
 	printf("remove_node classIdx=%d\n", classIdx);
+#endif
 
 	while (curr != head) {
 		if (curr == remove_block) {
@@ -671,6 +665,7 @@ remove_node(void *bp)
 	}
 }
 
+/*
 static void
 print_linked_lists()
 {
@@ -685,3 +680,4 @@ print_linked_lists()
 		}
 	}
 }
+*/
