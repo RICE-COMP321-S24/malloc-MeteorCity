@@ -14,11 +14,11 @@
  * as a pointer, i.e., sizeof(uintptr_t) == sizeof(void *).
  */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 
 #include "memlib.h"
 #include "mm.h"
@@ -49,13 +49,14 @@ typedef struct free_block *free_ptr;
 
 /* Define basic constant for the number of size classes in segmented list */
 /* Classes are based on total block size, including memory overhead  */
-/* {32 - 64}, {64 - 128}, {4096 - inf} */
+/* {32 - 64}, {65 - 128}, ..., {4097 - inf} */
 #define NUM_CLASSES 8
 
 /* Basic constants and macros: */
-#define WSIZE	  sizeof(void *) /* Word and header/footer size (bytes) (8) */
-#define DSIZE	  (2 * WSIZE)	 /* Doubleword size (bytes) (16) */
-#define CHUNKSIZE (1 << 12)	 /* Extend heap by this amount (bytes) */
+#define WSIZE	       sizeof(void *) /* Word and header/footer size (bytes) (8) */
+#define DSIZE	       (2 * WSIZE)    /* Doubleword size (bytes) (16) */
+#define CHUNKSIZE      (1 << 12)      /* Extend heap by this amount (bytes) */
+#define MIN_BLOCK_SIZE (2 * DSIZE)    /* Minimum block size (bytes) (32) */
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
@@ -69,6 +70,10 @@ typedef struct free_block *free_ptr;
 /* Read the size and allocated fields from address p. */
 #define GET_SIZE(p)  (GET(p) & ~(WSIZE - 1))
 #define GET_ALLOC(p) (GET(p) & 0x1)
+
+/* Determine if prologue or epilogue */
+#define IS_FIRST_BLOCK(p) (GET_SIZE(HDRP(PREV_BLKP(p))) == 0)
+#define IS_LAST_BLOCK(p)  (GET_SIZE(HDRP(NEXT_BLKP(p))) == 0)
 
 /* Given block ptr bp, compute address of its header and footer. */
 #define HDRP(bp) ((char *)(bp)-WSIZE)
@@ -112,7 +117,7 @@ mm_init(void)
 	/* Initialize fb_list */
 	if ((fb_list = mem_sbrk(NUM_CLASSES * DSIZE)) == (void *)-1)
 		return (-1);
-	
+
 	/* Initialize segregated fits free list */
 	for (int i = 0; i < NUM_CLASSES; i++) {
 		fb_list[i].prev = &fb_list[i];
@@ -141,12 +146,15 @@ mm_init(void)
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes. */
 	if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
 		return (-1);
+	/* to-do: Put this in the free list? */
+	// insert_node(heap_listp);
+	print_linked_lists();
 	return (0);
 }
 
 /*
  * Requires:
- *   size - The size of the payload we're trying to allocate a block for. 
+ *   size - The size of the payload we're trying to allocate a block for.
  *          Assumes that both pointers are taken into account of in size
  *
  * Effects:
@@ -165,6 +173,7 @@ mm_malloc(size_t size)
 	if (size == 0)
 		return (NULL);
 
+	printf("Trying to mm_malloc %lu\n", size);
 	/* Adjust block size */
 	if (size <= DSIZE)
 		/* 2 DSIZE for header, footer, and pointers */
@@ -175,6 +184,7 @@ mm_malloc(size_t size)
 
 	/* Search the free list for a fit. */
 	if ((bp = find_fit(asize)) != NULL) {
+		printf("Found a fit at %p\n", bp);
 		place(bp, asize);
 		return (bp);
 	}
@@ -239,6 +249,20 @@ mm_realloc(void *ptr, size_t size)
 	if (ptr == NULL)
 		return (mm_malloc(size));
 
+	/* Make sure ptr points to an allocated block. */
+	if (!GET_ALLOC(HDRP(ptr))) {
+		printf("Error: Trying to reallocate a free block.\n");
+		return NULL;
+	}
+
+	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+	/* Try to reuse current block if possible. */
+	if (oldsize >= size) {
+		place(ptr, size);
+		return ptr;
+	}
+
+	/* Creates a new allocated block and copies over. */
 	newptr = mm_malloc(size);
 
 	/* If realloc() fails, the original block is left untouched.  */
@@ -246,7 +270,7 @@ mm_realloc(void *ptr, size_t size)
 		return (NULL);
 
 	/* Copy just the old data, not the old header and footer. */
-	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+
 	if (size < oldsize)
 		oldsize = size;
 	memcpy(newptr, ptr, oldsize);
@@ -321,16 +345,16 @@ extend_heap(size_t words)
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
 	if ((bp = mem_sbrk(size)) == (void *)-1)
 		return (NULL);
+	printf("Extending heap by %lu\n", size);
 
 	/* Initialize free block header/footer and the epilogue header. */
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
-
+	insert_node(bp);
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
-
 
 /*
  * Requires:
@@ -343,32 +367,45 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	int min_class = get_min_class(asize);
-	free_ptr head = &fb_list[min_class];
-	free_ptr curr = head->next;
-
-	while (curr != head) {
-		size_t size = GET_SIZE(HDRP(curr));
-		if (size >= asize) {
-			return(curr);
-		}
-
-		curr = curr->next;
-	}
-
-	if (min_class < NUM_CLASSES - 1)
-		min_class++;
-
-	for (int i = min_class; i < NUM_CLASSES; i++) {
-		free_ptr head = &fb_list[i];
+	int classIdx = get_min_class(asize);
+	while (classIdx < NUM_CLASSES) {
+		free_ptr head = &fb_list[classIdx];
 		free_ptr curr = head->next;
-
-		if (curr != head) {
-			return(curr);
+		while (curr != head) {
+			if (GET_SIZE(HDRP(curr)) >= asize) {
+				return curr;
+			}
+			curr = curr->next;
 		}
+		classIdx++;
 	}
-
 	return NULL;
+	/*
+	char *head = get_class_hdr(asize);
+
+	if (head == NULL) {
+		return (NULL);
+	}
+	*/
+
+	/* Iterate through linked list */
+	/*
+	while (head != NULL) {
+		size_t csize = GET_SIZE(head);
+		*/
+
+	/* If it can't be housed, increment bp to the next node in LL */
+	/*
+	if (csize < asize) {
+		head = NEXT_LL(head);
+	} else {
+		break;
+	}
+}
+*/
+
+	/* Return a pointer to the first free block that can house asize */
+	/* return (head + WSIZE); Add WSIZE to account for header */
 }
 
 /*
@@ -386,19 +423,42 @@ place(void *bp, size_t asize)
 	/* Move split free block to lower class */
 	/* Remove split allocated block from linked lists */
 	size_t csize = GET_SIZE(HDRP(bp));
-	if ((csize - asize) >= (2 * DSIZE)) {
+	if ((csize - asize) >= (MIN_BLOCK_SIZE)) {
+		remove_node(bp); // to-do: verify
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		remove_node(bp);
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
-		remove_node(bp);
-		insert_node(bp);
+		insert_node(bp); // to-do: verify
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
+		remove_node(bp);
 	}
+}
+
+/*
+ * Requires:
+ *   "bp" is the address of a block.
+ *
+ * Effects:
+ *   Perform a search in the free lists for a free block "bp" in the heap.
+ */
+static bool
+isblockinfreelist(void *bp)
+{
+	for (int i = 0; i < NUM_CLASSES; i++) {
+		void *curr = fb_list[i].next;
+		// loop through circular linked list for size class i
+		while (curr != &fb_list[i]) {
+			if (curr == bp) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 /*
@@ -444,13 +504,52 @@ checkheap(bool verbose)
 		if (verbose)
 			printblock(bp);
 		checkblock(bp);
+
+		/* Checks if every free block is actually in the free list. */
+		if (!GET_ALLOC(HDRP(bp))) {
+			if (!isblockinfreelist(bp)) {
+				printf("Free block not in free list.\n");
+			}
+		}
 	}
 
 	if (verbose)
 		printblock(bp);
 	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
 		printf("Bad epilogue header\n");
+
+	// Are there any contiguous free blocks that somehow escaped coalescing?
+	// Do the pointers in the free list point to valid free blocks?
+	for (int i = 0; i < NUM_CLASSES; i++) {
+		free_ptr curr = fb_list[i].next;
+		// loop through circular linked list for size class i
+		while (curr != &fb_list[i]) {
+			if (GET_ALLOC(curr)) {
+				printf("Allocated block in free list\n");
+			} else {
+				// check if prev block is free, given that curr
+				// is not the first block
+				if (!IS_FIRST_BLOCK(curr) &&
+				    !GET_ALLOC(HDRP(PREV_BLKP(curr)))) {
+					printf(
+					    "Previous free block not coalesced\n");
+				}
+				/* Check if next block is free, given that curr
+				 * is not the last block */
+				if (!IS_LAST_BLOCK(curr) &&
+				    !GET_ALLOC(HDRP(NEXT_BLKP(curr)))) {
+					printf(
+					    "Next free block not coalesced\n");
+				}
+			}
+			curr = curr->next;
+		}
+	}
 }
+
+// Do the pointers in the free list point to valid free blocks?
+// Do any allocated blocks overlap?
+// Do the pointers in a heap block point to valid heap addresses?
 
 /*
  * Requires:
@@ -483,24 +582,40 @@ printblock(void *bp)
 /*
  * Requires:
  *   asize - The size of the block we're trying to allocate
- * 
+ *
  * Effects:
  *   Returns the int representing the minimum size class asize could fall into
-*/
+ */
 int
-get_min_class(size_t asize) {
+get_min_class(size_t asize)
+{
 	if (asize == 32) {
 		return 0;
 	}
 
 	/* Subtract 5 from the log since minimum asize is 32 */
-	int class = (int)log2(asize - 1) - 5;
+	int classIdx = (int)log2(asize - 1) - 5;
 
-	if (class > NUM_CLASSES - 1)
-		class = NUM_CLASSES - 1;
-	
-	return class;
+	if (classIdx > NUM_CLASSES - 1)
+		classIdx = NUM_CLASSES - 1;
+
+	return classIdx;
 }
+
+/*
+ * Requires:
+ *   asize - The size of the block we're trying to allocate
+ *
+ * Effects:
+ *   Returns the head of the linked list that contains a free block with
+ *   at least size asize. Returns (null) if one isn't found.
+ */
+/*
+static char *
+get_class_hdr(size_t asize) {
+
+}
+*/
 
 /*
  * Requires:
@@ -508,13 +623,14 @@ get_min_class(size_t asize) {
  *
  * Effects:
  *   Adds bp to the end of the linked list
-*/
+ */
 static void
-insert_node(void *bp) {
+insert_node(void *bp)
+{
 	size_t size = GET_SIZE(HDRP(bp));
-	int class = get_min_class(size);
-	printf("Class: %d\n", class);
-	free_ptr head = &fb_list[class];
+	int classIdx = get_min_class(size);
+	printf("ClassIdx: %d\n", classIdx);
+	free_ptr head = &fb_list[classIdx];
 	free_ptr new_block = bp;
 
 	new_block->next = head;
@@ -531,14 +647,17 @@ insert_node(void *bp) {
  *
  * Effects:
  *   Removes bp from the linked list
-*/
+ */
 static void
-remove_node(void *bp) {
+remove_node(void *bp)
+{
 	size_t size = GET_SIZE(HDRP(bp));
-	int class = get_min_class(size);
-	free_ptr head = &fb_list[class];
+	int classIdx = get_min_class(size);
+	free_ptr head = &fb_list[classIdx];
 	free_ptr curr = head->next;
 	free_ptr remove_block = bp;
+
+	printf("remove_node classIdx=%d\n", classIdx);
 
 	while (curr != head) {
 		if (curr == remove_block) {
@@ -546,19 +665,21 @@ remove_node(void *bp) {
 			remove_block->prev->next = remove_block->next;
 			remove_block->prev = NULL;
 			remove_block->next = NULL;
+			return;
 		}
 		curr = curr->next;
 	}
 }
 
 static void
-print_linked_lists() {
+print_linked_lists()
+{
 	for (int i = 0; i < NUM_CLASSES; i++) {
 		free_ptr head = &fb_list[i];
 		free_ptr curr = head->next;
 
 		printf("Linked List: %d\n", i);
-		while(curr != head) {
+		while (curr != head && curr->next != curr) {
 			printf("Next node: %p\n", curr);
 			curr = curr->next;
 		}
