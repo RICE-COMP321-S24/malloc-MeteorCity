@@ -149,6 +149,9 @@ mm_init(void)
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes. */
 	if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
 		return (-1);
+	/* to-do: Put this in the free list? */
+	// insert_node(heap_listp);
+	print_linked_lists();
 	return (0);
 }
 
@@ -173,6 +176,7 @@ mm_malloc(size_t size)
 	if (size == 0)
 		return (NULL);
 
+	printf("Trying to mm_malloc %lu\n", size);
 	/* Adjust block size */
 	if (size <= DSIZE)
 		/* 2 DSIZE for header, footer, and pointers */
@@ -183,6 +187,7 @@ mm_malloc(size_t size)
 
 	/* Search the free list for a fit. */
 	if ((bp = find_fit(asize)) != NULL) {
+		printf("Found a fit at %p\n", bp);
 		place(bp, asize);
 		return (bp);
 	}
@@ -343,12 +348,13 @@ extend_heap(size_t words)
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
 	if ((bp = mem_sbrk(size)) == (void *)-1)
 		return (NULL);
+	printf("Extending heap by %lu\n", size);
 
 	/* Initialize free block header/footer and the epilogue header. */
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
-
+	insert_node(bp);
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
@@ -419,15 +425,17 @@ place(void *bp, size_t asize)
 {
 	size_t csize = GET_SIZE(HDRP(bp));
 	if ((csize - asize) >= (MIN_BLOCK_SIZE)) {
+		remove_node(bp); // to-do: verify
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
-		// to-do: put node in correct-size free list
+		insert_node(bp); // to-do: verify
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
+		remove_node(bp);
 	}
 }
 
@@ -649,6 +657,8 @@ remove_node(void *bp)
 	free_ptr curr = head->next;
 	free_ptr remove_block = bp;
 
+	printf("remove_node classIdx=%d\n", classIdx);
+
 	while (curr != head) {
 		if (curr == remove_block) {
 			remove_block->next->prev = remove_block->prev;
@@ -669,7 +679,7 @@ print_linked_lists()
 		free_ptr curr = head->next;
 
 		printf("Linked List: %d\n", i);
-		while (curr != head) {
+		while (curr != head && curr->next != curr) {
 			printf("Next node: %p\n", curr);
 			curr = curr->next;
 		}
