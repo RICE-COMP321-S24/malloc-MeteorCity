@@ -172,8 +172,9 @@ mm_malloc(size_t size)
 	/* Ignore spurious requests. */
 	if (size == 0)
 		return (NULL);
-
+#ifdef DEBUG_PRINT
 	printf("Trying to mm_malloc %lu\n", size);
+#endif
 	/* Adjust block size */
 	if (size <= DSIZE)
 		/* 2 DSIZE for header, footer, and pointers */
@@ -184,7 +185,9 @@ mm_malloc(size_t size)
 
 	/* Search the free list for a fit. */
 	if ((bp = find_fit(asize)) != NULL) {
+#ifdef DEBUG_PRINT
 		printf("Found a fit at %p\n", bp);
+#endif
 		place(bp, asize);
 		return (bp);
 	}
@@ -238,6 +241,7 @@ mm_realloc(void *ptr, size_t size)
 {
 	size_t oldsize;
 	void *newptr;
+	size_t asize;
 
 	/* If size == 0 then this is just free, and we return NULL. */
 	if (size == 0) {
@@ -256,9 +260,15 @@ mm_realloc(void *ptr, size_t size)
 	}
 
 	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+
+	if (size <= DSIZE)
+		asize = 2 * DSIZE;
+	else
+		asize = DSIZE * ((size + DSIZE + (DSIZE - 1)) / DSIZE);
+
 	/* Try to reuse current block if possible. */
-	if (oldsize >= size) {
-		place(ptr, size);
+	if (oldsize >= asize) {
+		place(ptr, asize);
 		return ptr;
 	}
 
@@ -345,13 +355,15 @@ extend_heap(size_t words)
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
 	if ((bp = mem_sbrk(size)) == (void *)-1)
 		return (NULL);
+#ifdef DEBUG_PRINT
 	printf("Extending heap by %lu\n", size);
+#endif
 
 	/* Initialize free block header/footer and the epilogue header. */
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
-	insert_node(bp);
+
 	/* Coalesce if the previous block was free. */
 	return (coalesce(bp));
 }
@@ -427,7 +439,7 @@ place(void *bp, size_t asize)
 		remove_node(bp); // to-do: verify
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
-		remove_node(bp);
+
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
@@ -571,7 +583,9 @@ printblock(void *bp)
 	falloc = GET_ALLOC(FTRP(bp));
 
 	if (hsize == 0) {
+
 		printf("%p: end of heap\n", bp);
+
 		return;
 	}
 
@@ -629,7 +643,9 @@ insert_node(void *bp)
 {
 	size_t size = GET_SIZE(HDRP(bp));
 	int classIdx = get_min_class(size);
+#ifdef DEBUG_PRINT
 	printf("ClassIdx: %d\n", classIdx);
+#endif
 	free_ptr head = &fb_list[classIdx];
 	free_ptr new_block = bp;
 
@@ -637,8 +653,11 @@ insert_node(void *bp)
 	new_block->prev = head->prev;
 	head->prev->next = new_block;
 	head->prev = new_block;
-
+#ifdef DEBUG_PRINT
 	print_linked_lists();
+#endif
+
+	// checkheap(false);
 }
 
 /*
@@ -656,15 +675,15 @@ remove_node(void *bp)
 	free_ptr head = &fb_list[classIdx];
 	free_ptr curr = head->next;
 	free_ptr remove_block = bp;
-
+#ifdef DEBUG_PRINT
 	printf("remove_node classIdx=%d\n", classIdx);
-
+#endif
 	while (curr != head) {
 		if (curr == remove_block) {
 			remove_block->next->prev = remove_block->prev;
 			remove_block->prev->next = remove_block->next;
-			remove_block->prev = NULL;
-			remove_block->next = NULL;
+			// remove_block->prev = NULL;
+			// remove_block->next = NULL;
 			return;
 		}
 		curr = curr->next;
