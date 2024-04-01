@@ -1,4 +1,5 @@
 
+
 /*
  * Simple, 32-bit and 64-bit clean allocator based on an implicit free list,
  * first fit placement, and boundary tag coalescing, as described in the
@@ -148,11 +149,7 @@ mm_init(void)
 		return (-1);
 	/* to-do: Put this in the free list? */
 	// insert_node(heap_listp);
-
-#ifdef DEBUG_PRINT
-	printf("print_linked_lists in mm_init\n");
-	print_linked_lists();
-#endif
+	// print_linked_lists();
 	return (0);
 }
 
@@ -263,16 +260,28 @@ mm_realloc(void *ptr, size_t size)
 		return NULL;
 	}
 
-	oldsize = GET_SIZE(HDRP(ptr)) - DSIZE;
+	oldsize = GET_SIZE(HDRP(ptr));
 
 	if (size <= DSIZE)
 		asize = 2 * DSIZE;
 	else
-		asize = DSIZE * ((size + DSIZE + (DSIZE - 1)) / DSIZE);
+		asize = WSIZE * ((size + DSIZE + (WSIZE - 1)) / WSIZE);
 
 	/* Try to reuse current block if possible. */
 	if (oldsize >= asize) {
 		place(ptr, asize);
+		return ptr;
+	}
+
+	/* Account for case where there is a free block next to curr with
+	 * sufficient space. */
+	size_t next_blk_size = GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+	size_t total_size = next_blk_size + oldsize;
+	if (!GET_ALLOC(HDRP(NEXT_BLKP(ptr))) && (total_size) >= asize) {
+		remove_node(NEXT_BLKP(ptr));
+		PUT(HDRP(ptr), PACK(total_size, 1));
+		PUT(FTRP(ptr), PACK(total_size, 1));
+
 		return ptr;
 	}
 
@@ -385,13 +394,16 @@ find_fit(size_t asize)
 {
 	int classIdx = get_min_class(asize);
 	while (classIdx < NUM_CLASSES) {
+		int counter = 0;
+		int threshold = 25;
 		free_ptr head = &fb_list[classIdx];
 		free_ptr curr = head->next;
-		while (curr != head) {
+		while (curr != head && counter <= threshold) {
 			if (GET_SIZE(HDRP(curr)) >= asize) {
 				return curr;
 			}
 			curr = curr->next;
+			counter++;
 		}
 		classIdx++;
 	}
@@ -417,7 +429,6 @@ place(void *bp, size_t asize)
 		remove_node(bp); // to-do: verify
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
-
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
@@ -535,11 +546,9 @@ checkheap(bool verbose)
 			curr = curr->next;
 		}
 	}
+	// Do any allocated blocks overlap?
+	// Do the pointers in a heap block point to valid heap addresses?
 }
-
-// Do the pointers in the free list point to valid free blocks?
-// Do any allocated blocks overlap?
-// Do the pointers in a heap block point to valid heap addresses?
 
 /*
  * Requires:
@@ -596,21 +605,6 @@ get_min_class(size_t asize)
 
 /*
  * Requires:
- *   asize - The size of the block we're trying to allocate
- *
- * Effects:
- *   Returns the head of the linked list that contains a free block with
- *   at least size asize. Returns (null) if one isn't found.
- */
-/*
-static char *
-get_class_hdr(size_t asize) {
-
-}
-*/
-
-/*
- * Requires:
  *   bp - Pointer to the free block we're adding to the linked list
  *
  * Effects:
@@ -652,23 +646,24 @@ insert_node(void *bp)
 static void
 remove_node(void *bp)
 {
+	/*
 	size_t size = GET_SIZE(HDRP(bp));
 	int classIdx = get_min_class(size);
 	free_ptr head = &fb_list[classIdx];
 	free_ptr curr = head->next;
+	*/
 	free_ptr remove_block = bp;
+
 #ifdef DEBUG_PRINT
 	printf("remove_node classIdx=%d\n", classIdx);
 #endif
-	while (curr != head) {
-		if (curr == remove_block) {
-			remove_block->next->prev = remove_block->prev;
-			remove_block->prev->next = remove_block->next;
-			// remove_block->prev = NULL;
-			// remove_block->next = NULL;
-			return;
-		}
-		curr = curr->next;
+	if (!remove_block || !remove_block->prev || !remove_block->next) {
+		return;
+	} else {
+		remove_block->next->prev = remove_block->prev;
+		remove_block->prev->next = remove_block->next;
+		remove_block->prev = NULL;
+		remove_block->next = NULL;
 	}
 }
 
