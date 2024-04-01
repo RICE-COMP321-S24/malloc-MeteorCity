@@ -7,9 +7,49 @@ Using 2 slipdays
 
 DESIGN DESCRIPTION
 
-<Replace with an English description of your submission's design.> 
+We implemented a segregated fits strategy to maintain the free lists, which we 
+separated into 15 classes based on size. Each list is modeled by a circular 
+linked list. We used a struct to represent the previous and next pointers for 
+the elements in the free lists. This speeds up the process for the allocator to
+find a suitable free block when malloc or realloc is called, since it can 
+essentially search based on size. 
+For finding the fit, we use a variation of first_fit where we loop through the 
+minimum possible size class that fulfills the requested size. We loop until we
+either find a free block which has a size greater than or equal to the requested
+size or until we reach the end or a certain threshold, after which we proceed to 
+the next size class. When a sufficient size is found then a pointer to that free 
+block is returned. 
+For splitting, we moved the remaining free block into the corresponding size 
+class. For realloc, we considered first the case where the new requested asize 
+was less than or equal to the old size, upon which we would split the block if
+necessary and return the same pointer. We also considered the case where the 
+new requested asize is greater than the old size, but the next block is a free
+block which offers a size such that the combined sizes of the blocks is 
+sufficient for the new requested asize. This increases our throughput, since we
+dont have to call free and malloc, but instead keep the same pointer and just
+extend the block size with the extra free space.
+We also have insert_node and remove_node functions for adding newly freed blocks
+to the linked list of the correct size class and removing newly allocated blocks
+from the free list. For insertion, we are using a LIFO approach to add pointers
+to the linked lists.
+
+
 
 checkheap() DESCRIPTION
 
-<Replace with an English description of your submission's heap consistency
- checker.>
+Our checkheap() function performs a check of the heap for consistency. 
+We check for a bad prologue header and a bad epilogue header ("bad" signifying 
+either a free bit being incorrectly assigned to the prologue/epilogue or an 
+incorrect header size). 
+We iterate through the heap to check if every free block is actually in the
+free list. We do this by calling a helper function isblockinfreelist(void *bp), 
+which loops through the free lists to search for a pointer to the free block. 
+We also iterate through the heap to check if any allocated blocks overlap. We
+can do this by checking if the pointers are outside the range of the heap's 
+memory. If this is the case, there is an overlap. 
+We loop through the free lists (outer for loop to traverse each of the 8
+classes and inner while loop to traverse each circular linked list). We first
+ensure that each element points to a free block, not an allocated one. For each 
+pointer to a free block, we check if there is a free block before or after that
+to see if any free blocks escaped coalescing. 
+

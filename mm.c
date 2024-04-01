@@ -398,7 +398,7 @@ find_fit(size_t asize)
 	int classIdx = GET_INDEX(asize);
 	while (classIdx < NUM_CLASSES) {
 		int counter = 0;
-		int threshold = 25;
+		int threshold = 16;
 		free_ptr head = &fb_list[classIdx];
 		free_ptr curr = head->next;
 		while (curr != head && counter <= threshold) {
@@ -504,6 +504,12 @@ checkheap(bool verbose)
 		printf("Bad prologue header\n");
 	checkblock(heap_listp);
 
+	if (verbose)
+		printblock(bp);
+	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
+		printf("Bad epilogue header\n");
+
+	/* Iterate through the heap. */
 	for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
 		if (verbose)
 			printblock(bp);
@@ -515,12 +521,16 @@ checkheap(bool verbose)
 				printf("Free block not in free list.\n");
 			}
 		}
-	}
 
-	if (verbose)
-		printblock(bp);
-	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
-		printf("Bad epilogue header\n");
+		/* Checks if any allocated blocks overlap. */
+		if (GET_ALLOC(HDRP(bp)) && GET_ALLOC(HDRP(NEXT_BLKP(bp)))) {
+			if ((uintptr_t)mem_heap_lo() >
+				(uintptr_t)NEXT_BLKP(bp) ||
+			    (uintptr_t)mem_heap_hi() < (uintptr_t)bp) {
+				printf("Overlap between allocated blocks\n");
+			}
+		}
+	}
 
 	// Are there any contiguous free blocks that somehow escaped coalescing?
 	// Do the pointers in the free list point to valid free blocks?
