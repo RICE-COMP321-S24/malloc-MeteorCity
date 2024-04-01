@@ -50,8 +50,8 @@ typedef struct free_block *free_ptr;
 
 /* Define basic constant for the number of size classes in segmented list */
 /* Classes are based on total block size, including memory overhead  */
-/* {32 - 64}, {65 - 128}, ..., {4097 - inf} */
-#define NUM_CLASSES 8
+/* {32 - 64}, {65 - 128}, ..., {some number - inf} */
+#define NUM_CLASSES 15
 
 /* Basic constants and macros: */
 #define WSIZE	       sizeof(void *) /* Word and header/footer size (bytes) (8) */
@@ -60,6 +60,7 @@ typedef struct free_block *free_ptr;
 #define MIN_BLOCK_SIZE (2 * DSIZE)    /* Minimum block size (bytes) (32) */
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
 
 /* Pack a size and allocated bit into a word. */
 #define PACK(size, alloc) ((size) | (alloc))
@@ -84,6 +85,8 @@ typedef struct free_block *free_ptr;
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
 
+#define GET_INDEX(size) (MIN(31 -__builtin_clz(size - 4), NUM_CLASSES - 1))
+
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */
 static free_ptr fb_list;
@@ -94,7 +97,7 @@ static void *extend_heap(size_t words);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 
-static int get_min_class(size_t asize);
+// static int get_min_class(size_t asize);
 static void insert_node(void *bp);
 static void remove_node(void *bp);
 // static void print_linked_lists();
@@ -392,7 +395,7 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	int classIdx = get_min_class(asize);
+	int classIdx = GET_INDEX(asize);
 	while (classIdx < NUM_CLASSES) {
 		int counter = 0;
 		int threshold = 25;
@@ -587,6 +590,7 @@ printblock(void *bp)
  * Effects:
  *   Returns the int representing the minimum size class asize could fall into
  */
+/*
 int
 get_min_class(size_t asize)
 {
@@ -594,7 +598,7 @@ get_min_class(size_t asize)
 		return 0;
 	}
 
-	/* Subtract 5 from the log since minimum asize is 32 */
+	// Subtract 5 from the log since minimum asize is 32
 	int classIdx = (int)log2(asize - 1) - 5;
 
 	if (classIdx > NUM_CLASSES - 1)
@@ -602,6 +606,7 @@ get_min_class(size_t asize)
 
 	return classIdx;
 }
+*/
 
 /*
  * Requires:
@@ -618,7 +623,7 @@ insert_node(void *bp)
 #endif
 
 	size_t size = GET_SIZE(HDRP(bp));
-	int classIdx = get_min_class(size);
+	int classIdx = GET_INDEX(size);
 #ifdef DEBUG_PRINT
 	printf("ClassIdx: %d\n", classIdx);
 #endif
@@ -657,7 +662,7 @@ remove_node(void *bp)
 #ifdef DEBUG_PRINT
 	printf("remove_node classIdx=%d\n", classIdx);
 #endif
-	if (!remove_block || !remove_block->prev || !remove_block->next) {
+	if (!remove_block || !remove_block->next || !remove_block->prev) {
 		return;
 	} else {
 		remove_block->next->prev = remove_block->prev;
