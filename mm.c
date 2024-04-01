@@ -97,10 +97,8 @@ static void *extend_heap(size_t words);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 
-// static int get_min_class(size_t asize);
 static void insert_node(void *bp);
 static void remove_node(void *bp);
-// static void print_linked_lists();
 
 /* Function prototypes for heap consistency checker routines: */
 static void checkblock(void *bp);
@@ -150,9 +148,7 @@ mm_init(void)
 	/* Extend the empty heap with a free block of CHUNKSIZE bytes. */
 	if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
 		return (-1);
-	/* to-do: Put this in the free list? */
-	// insert_node(heap_listp);
-	// print_linked_lists();
+
 	return (0);
 }
 
@@ -176,9 +172,7 @@ mm_malloc(size_t size)
 	/* Ignore spurious requests. */
 	if (size == 0)
 		return (NULL);
-#ifdef DEBUG_PRINT
-	printf("Trying to mm_malloc %lu\n", size);
-#endif
+
 	/* Adjust block size */
 	if (size <= DSIZE)
 		/* 2 DSIZE for header, footer, and pointers */
@@ -189,9 +183,6 @@ mm_malloc(size_t size)
 
 	/* Search the free list for a fit. */
 	if ((bp = find_fit(asize)) != NULL) {
-#ifdef DEBUG_PRINT
-		printf("Found a fit at %p\n", bp);
-#endif
 		place(bp, asize);
 		return (bp);
 	}
@@ -371,10 +362,7 @@ extend_heap(size_t words)
 	size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
 	if ((bp = mem_sbrk(size)) == (void *)-1)
 		return (NULL);
-#ifdef DEBUG_PRINT
-	printf("Extending heap by %lu\n", size);
-#endif
-
+	
 	/* Initialize free block header/footer and the epilogue header. */
 	PUT(HDRP(bp), PACK(size, 0));	      /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));	      /* Free block footer */
@@ -429,13 +417,13 @@ place(void *bp, size_t asize)
 	/* Remove split allocated block from linked lists */
 	size_t csize = GET_SIZE(HDRP(bp));
 	if ((csize - asize) >= (MIN_BLOCK_SIZE)) {
-		remove_node(bp); // to-do: verify
+		remove_node(bp);
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
-		insert_node(bp); // to-do: verify
+		insert_node(bp);
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
@@ -559,8 +547,6 @@ checkheap(bool verbose)
 			curr = curr->next;
 		}
 	}
-	// Do any allocated blocks overlap?
-	// Do the pointers in a heap block point to valid heap addresses?
 }
 
 /*
@@ -595,31 +581,6 @@ printblock(void *bp)
 
 /*
  * Requires:
- *   asize - The size of the block we're trying to allocate
- *
- * Effects:
- *   Returns the int representing the minimum size class asize could fall into
- */
-/*
-int
-get_min_class(size_t asize)
-{
-	if (asize == 32) {
-		return 0;
-	}
-
-	// Subtract 5 from the log since minimum asize is 32
-	int classIdx = (int)log2(asize - 1) - 5;
-
-	if (classIdx > NUM_CLASSES - 1)
-		classIdx = NUM_CLASSES - 1;
-
-	return classIdx;
-}
-*/
-
-/*
- * Requires:
  *   bp - Pointer to the free block we're adding to the linked list
  *
  * Effects:
@@ -628,27 +589,16 @@ get_min_class(size_t asize)
 static void
 insert_node(void *bp)
 {
-#ifdef DEBUG_PRINT
-	printf("Trying to insert %p\n", bp);
-#endif
-
 	size_t size = GET_SIZE(HDRP(bp));
 	int classIdx = GET_INDEX(size);
-#ifdef DEBUG_PRINT
-	printf("ClassIdx: %d\n", classIdx);
-#endif
 	free_ptr head = &fb_list[classIdx];
 	free_ptr new_block = bp;
 
+	/* Insert new node at the end of the linked list */
 	new_block->next = head;
 	new_block->prev = head->prev;
 	head->prev->next = new_block;
 	head->prev = new_block;
-#ifdef DEBUG_PRINT
-	print_linked_lists();
-#endif
-
-	// checkheap(false);
 }
 
 /*
@@ -661,40 +611,17 @@ insert_node(void *bp)
 static void
 remove_node(void *bp)
 {
-	/*
-	size_t size = GET_SIZE(HDRP(bp));
-	int classIdx = get_min_class(size);
-	free_ptr head = &fb_list[classIdx];
-	free_ptr curr = head->next;
-	*/
 	free_ptr remove_block = bp;
 
-#ifdef DEBUG_PRINT
-	printf("remove_node classIdx=%d\n", classIdx);
-#endif
 	if (!remove_block || !remove_block->next || !remove_block->prev) {
 		return;
-	} else {
+	}
+	
+	// Set pointers to skip remove_block
+	else {
 		remove_block->next->prev = remove_block->prev;
 		remove_block->prev->next = remove_block->next;
 		remove_block->prev = NULL;
 		remove_block->next = NULL;
 	}
 }
-
-/*
-static void
-print_linked_lists()
-{
-	for (int i = 0; i < NUM_CLASSES; i++) {
-		free_ptr head = &fb_list[i];
-		free_ptr curr = head->next;
-
-		printf("Linked List: %d\n", i);
-		while (curr != head && curr->next != curr) {
-			printf("Next node: %p\n", curr);
-			curr = curr->next;
-		}
-	}
-}
-*/
